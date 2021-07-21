@@ -78,7 +78,7 @@ dev_str = args.get("--dev", dft="ttyUSB0")
 baud = int(args.get("--baud", dft="115200"), 0)
 motor_addr = args.get("--m-a", dft="80:00:55" if direct else "80:00:fd")
 dev_addr = args.get("--d-a", dft="80:00:55" if direct else "80:00:fe")
-
+adv_addr = "80:00:ff"
 
 sub_size = 128
 
@@ -110,13 +110,14 @@ _thread.start_new_thread(dbg_echo, ())
     
 def read_info(addr):
     sock.sendto(b'\x00', (addr, 1))
+    # Get name in ret.
     ret, sec = sock.recvfrom(timeout=1)
-    #print(f'ret = {ret}')
-    #print(f'sec = {sec}')
+    #print(ret)
+    #print(sec)
     
-    if ret == None or ret[0] != 0x80:
-        print(f'read_info error')
-    return ret
+    #if ret == None or ret[0] != 0x80:
+        #print(f'read_info error')
+    return ret, sec
 
 def csa_write(offset, dat, addr):
     sock.sendto(b'\x20' + struct.pack("<H", offset) + dat, (addr, 5))
@@ -135,85 +136,105 @@ def csa_read(offset, len_, addr):
         #print(f'csa_read error at: 0x{offset:x}, len: {len_}')
     return ret
 
-def get_dst():
-    csa_read(0x0048, 0x04, dev_addr)
-    csa_read(0x0050, 0x02, dev_addr)
-
 def get_dev_name():
     global dev_name
-    dev_name = str(read_info(dev_addr)).split(';')[0].split(' ')[1]
+    dev_name = str(read_info(dev_addr)[0]).split(';')[0].split(' ')[1]
     
-def search_dev():
+def set_addr():
     global dev_addr
     
     
+def find_dev():
+    global dev_addr
+    ret_g, sec_g = read_info(adv_addr)
+    if ret_g is None or sec_g is None:
+        print("\033[1;31;40m没有找到设备 x_x \033[0m")
+    else:
+        print("\033[1;32;40m已找到设备 ^_^ \033[0m")
+        
+        if ret_g is not None:
+            try:
+                ret_g = str(ret_g[1:], encoding = "utf-8").split(';')[0].split(' ')[1]
+            except:
+                ret_g = 'Null'
+                
+            print("\033[1;32;40m设备名称: %s \033[0m" %ret_g)
+            
+        if sec_g is not None:
+            try:
+                sec_g = sec_g[0]
+            except:
+                sec_g = 'Null'
+           
+            print("\033[1;32;40m设备地址: %s \033[0m" %sec_g)
+            dev_addr = sec_g
 
 #bailey
+import time
 def work_thread():
-    import time
     global run_flag, stop_flag
-    sleep_cut=0
+    sleep_cut = 0
     
     while True:
         time.sleep(1)
         if run_flag:
-            print('run')
-            
-            # Set address of device.
+            # set address of device.
             get_dev_name()
-            if dev_name=='bb_hs':
+            if dev_name == 'bb_hs':
                 print('Device is hs.')
-                dd_flag=0;
-                addr_num=(int(dev_num)+0x10)
-            elif dev_name=='bb_dd':
+                dd_flag = 0;
+                addr_num = (int(dev_num) + 0x10)
+            elif dev_name == 'bb_dd':
                 print('Device is dd.')
-                dd_flag=1;
-                addr_num=(int(dev_num)+0x20)
-                
-            # Print address infomation.
-            print('addr = %#x' %addr_num)
-            addr_num=addr_num.to_bytes(1, byteorder = 'little')
-            # Set.
-            csa_write(0x0009, addr_num, dev_addr) #mac
-            csa_write(0x0007, b'\x01', dev_addr) #save
+                dd_flag = 1;
+                addr_num = (int(dev_num) + 0x20)
             
+            # calibration
             if dd_flag:
-                # Calibration for dd.
+                # calibration for dd.
                 csa_write(0x00b1, b'\x01\x00', motor_addr)
                 for i in range(11):
-                    d_v=struct.pack("i", (0x0640*i))
-                    print(d_v)
+                    d_v = struct.pack("i", (0x0640*i))
+                    print("第 %d 步" %i)
                     csa_write(0x00bc, d_v, motor_addr)
                     time.sleep(2)
-                    print(f'i = {struct.pack("b", i)}')
+                    #print(f'i = {struct.pack("b", i)}')
                     csa_write(0x0052, struct.pack("b", i), dev_addr) #set
                     time.sleep(0.2)
-                    dd_flag=0
+                    dd_flag = 0
                     if stop_flag:
-                        stop_flag=0
+                        stop_flag = 0
                         break   
-                        
+                time.sleep(1.5)                        
             
-            time.sleep(1.5)
+            # print address infomation.
+            print('addr = %#x' %addr_num)
+            addr_num = addr_num.to_bytes(1, byteorder = 'little')
+            # set and save.
             print("save!")
+            csa_write(0x0009, addr_num, dev_addr) #mac
             csa_write(0x0007, b'\x01', dev_addr) #save
-            csa_write(0x00bc, b'\x00\x00\x00\x00', motor_addr)            
-            
+            # motor go home
+            csa_write(0x00bc, b'\x00\x00\x00\x00', motor_addr)
+            # reboot
             time.sleep(0.5)
             csa_write(0x0005, b'\x01', dev_addr) # reboot
-            
             # Over.    
             print('***Program is over.***\n------------\n')
             run_flag=0
                 
-            
         else:
-            if sleep_cut==0:
-                get_dst()
-                print('sleep...')
-            sleep_cut+=1
-            if sleep_cut==3:
-                sleep_cut=0
+            if sleep_cut == 0:
+                # loop
+                sleep_cut += 1
+                # cLear for linux
+                import os
+                os.system("clear")
+                # get device infomation
+                find_dev()
+                                
+            if sleep_cut == 1:
+                sleep_cut = 0
 
 
 def main_thread():
@@ -222,80 +243,81 @@ def main_thread():
     csa_write(0x00b1, b'\x01\x00', motor_addr)
     global run_flag, dev_num, stop_flag
     while True:
-        key=readkey()
-        if run_flag==0:
+        key = readkey()
+        if run_flag == 0:
             #control
-            if key=='w':
+            if key == 'w':
                 print('w')
                 csa_write(0x00b1, b'\x01\x00', motor_addr)
                 csa_write(0x00bc, b'\x40\x06\x00\x00', motor_addr)
-            if key=='W':
+            if key == 'W':
                 print('W')
                 csa_write(0x00b1, b'\x01\x00', motor_addr)
                 csa_write(0x00bc, b'\x40\x1f\x00\x00', motor_addr)
-            if key=='f':
+            if key == 'f':
                 print('s')
                 csa_write(0x00b1, b'\x01\x00', motor_addr)
                 csa_write(0x00bc, b'\xa0\xfe\xff\xff', motor_addr)
-            if key=='s':
+            if key == 's':
                 print('s')
                 csa_write(0x00b1, b'\x01\x00', motor_addr)
                 csa_write(0x00bc, b'\xc0\xf9\xff\xff', motor_addr)
-            if key=='S':
+            if key == 'S':
                 print('S')
                 csa_write(0x00b1, b'\x01\x00', motor_addr)
                 csa_write(0x00bc, b'\xc0\xe0\xff\xff', motor_addr)
             #number
-            if key=='1':
+            if key == '1':
                 print('1')
                 dev_num = 1
-                run_flag=1
-            if key=='2':
+                run_flag = 1
+            if key == '2':
                 print('2')
                 dev_num = 2
-                run_flag=1
-            if key=='3':
+                run_flag = 1
+            if key == '3':
                 print('3')
                 dev_num = 3
-                run_flag=1
-            if key=='4':
+                run_flag = 1
+            if key == '4':
                 print('4')
                 dev_num = 4
-                run_flag=1
-            if key=='5':
+                run_flag = 1
+            if key == '5':
                 print('5')
                 dev_num = 5
-                run_flag=1
-            if key=='6':
+                run_flag = 1
+            if key == '6':
                 print('6')
                 dev_num = 6
-                run_flag=1
-            if key=='7':
+                run_flag = 1
+            if key == '7':
                 print('7')
                 dev_num = 7
-                run_flag=1
-            if key=='8':
+                run_flag = 1
+            if key == '8':
                 print('8')
                 dev_num = 8
-                run_flag=1
+                run_flag = 1
         
         elif run_flag:
-            if key==' ':
+            if key == ' ':
                 print('Stop.')
-                stop_flag=1
+                stop_flag = 1
                 
-        if key=='q':
+        if key == 'q':
             print('Quit.')
+            csa_write(0x00d6, b'\x00\x00', motor_addr)
             break
-            
+
 #main
 #flag
-run_flag=0
-dd_flag=0
-stop_flag=0
+run_flag = 0
+dd_flag = 0
+stop_flag = 0
 #num
-dev_num=0
-dev_name=''
+dev_num = 0
+dev_name = ''
 
 _thread.start_new_thread(work_thread, ())
 main_thread()
