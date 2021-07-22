@@ -140,16 +140,25 @@ def get_dev_name():
     global dev_name
     dev_name = str(read_info(dev_addr)[0]).split(';')[0].split(' ')[1]
     
-def set_addr():
-    global dev_addr
+def get_dst():
+    #csa_read(0x0010, 44, dev_addr) #buf
+    dst = struct.unpack("h", csa_read(0x0050, 2, dev_addr)[1:])[0] #dst
+    if dst == -32768:
+        print("\033[1;31;40m  --- 没有检测到金属 QAQ ---  \033[0m")
+    else:
+        #dst_s = dst[0] + "." + dst[1:] + "mm" 
+        print("\033[1;32;40m DST = %s \033[0m" %dst)
     
-    
+
 def find_dev():
-    global dev_addr
+    global dev_addr, time_cut
+    print("\033[1;29;40m   %d   \033[0m" %time_cut)
+    time_cut += 1
     ret_g, sec_g = read_info(adv_addr)
     if ret_g is None or sec_g is None:
         print("\033[1;31;40m没有找到设备 x_x \033[0m")
     else:
+        #get_dst()
         print("\033[1;32;40m已找到设备 ^_^ \033[0m")
         
         if ret_g is not None:
@@ -159,7 +168,11 @@ def find_dev():
                 ret_g = 'Null'
                 
             print("\033[1;32;40m设备名称: %s \033[0m" %ret_g)
-            
+            if ret_g == "bb_dd":
+                dd_flag = 1
+            else:
+                dd_flag = 0
+                    
         if sec_g is not None:
             try:
                 sec_g = sec_g[0]
@@ -168,6 +181,9 @@ def find_dev():
            
             print("\033[1;32;40m设备地址: %s \033[0m" %sec_g)
             dev_addr = sec_g
+        
+        if dd_flag == 1:
+            get_dst()
 
 #bailey
 import time
@@ -180,40 +196,42 @@ def work_thread():
         if run_flag:
             # set address of device.
             get_dev_name()
-            if dev_name == 'bb_hs':
-                print('Device is hs.')
-                dd_flag = 0;
-                addr_num = (int(dev_num) + 0x10)
-            elif dev_name == 'bb_dd':
-                print('Device is dd.')
-                dd_flag = 1;
-                addr_num = (int(dev_num) + 0x20)
+            if dev_num != 0:
+                if dev_name == 'bb_hs':
+                    print('Device is hs.')
+                    dd_flag = 0;
+                    addr_num = (int(dev_num) + 0x10)
+                elif dev_name == 'bb_dd':
+                    print('Device is dd.')
+                    dd_flag = 1;
+                    addr_num = (int(dev_num) + 0x20)
             
-            # calibration
-            if dd_flag:
-                # calibration for dd.
-                csa_write(0x00b1, b'\x01\x00', motor_addr)
-                for i in range(11):
-                    d_v = struct.pack("i", (0x0640*i))
-                    print("第 %d 步" %i)
-                    csa_write(0x00bc, d_v, motor_addr)
-                    time.sleep(2)
-                    #print(f'i = {struct.pack("b", i)}')
+            # calibration & testing
+            # calibration for dd.
+            csa_write(0x00b1, b'\x01\x00', motor_addr)
+            for i in range(11):
+                d_v = struct.pack("i", (0x0640*i))
+                print("第 %d 步" %i)
+                csa_write(0x00bc, d_v, motor_addr)
+                time.sleep(2)
+                get_dst()
+                print("")
+                if dev_num != 0:
                     csa_write(0x0052, struct.pack("b", i), dev_addr) #set
-                    time.sleep(0.2)
-                    dd_flag = 0
-                    if stop_flag:
-                        stop_flag = 0
-                        break   
-                time.sleep(1.5)                        
+                time.sleep(0.2)
+                if stop_flag:
+                    stop_flag = 0
+                    break   
+            time.sleep(1.5)                        
             
             # print address infomation.
-            print('addr = %#x' %addr_num)
-            addr_num = addr_num.to_bytes(1, byteorder = 'little')
             # set and save.
-            print("save!")
-            csa_write(0x0009, addr_num, dev_addr) #mac
-            csa_write(0x0007, b'\x01', dev_addr) #save
+            if dev_num != 0:
+                print('addr = %#x' %addr_num)
+                addr_num = addr_num.to_bytes(1, byteorder = 'little')
+                print("save!")            
+                csa_write(0x0009, addr_num, dev_addr) #mac
+                csa_write(0x0007, b'\x01', dev_addr) #save
             # motor go home
             csa_write(0x00bc, b'\x00\x00\x00\x00', motor_addr)
             # reboot
@@ -222,6 +240,8 @@ def work_thread():
             # Over.    
             print('***Program is over.***\n------------\n')
             run_flag=0
+            
+            
                 
         else:
             if sleep_cut == 0:
@@ -232,6 +252,9 @@ def work_thread():
                 os.system("clear")
                 # get device infomation
                 find_dev()
+                #if dst_flag:
+                    
+                # get dst
                                 
             if sleep_cut == 1:
                 sleep_cut = 0
@@ -241,7 +264,7 @@ def main_thread():
     #lock
     csa_write(0x00d6, b'\x01\x00', motor_addr)
     csa_write(0x00b1, b'\x01\x00', motor_addr)
-    global run_flag, dev_num, stop_flag
+    global run_flag, dev_num, stop_flag, dst_flag
     while True:
         key = readkey()
         if run_flag == 0:
@@ -266,6 +289,9 @@ def main_thread():
                 print('S')
                 csa_write(0x00b1, b'\x01\x00', motor_addr)
                 csa_write(0x00bc, b'\xc0\xe0\xff\xff', motor_addr)
+            if key == 'd':
+                print('d')        
+                d_flag = not d_flag
             #number
             if key == '1':
                 print('1')
@@ -299,6 +325,10 @@ def main_thread():
                 print('8')
                 dev_num = 8
                 run_flag = 1
+            if key == '0':
+                print('0')
+                dev_num = 0
+                run_flag = 1
         
         elif run_flag:
             if key == ' ':
@@ -315,8 +345,10 @@ def main_thread():
 run_flag = 0
 dd_flag = 0
 stop_flag = 0
+d_flag = 0
 #num
 dev_num = 0
+time_cut = 0
 dev_name = ''
 
 _thread.start_new_thread(work_thread, ())
@@ -326,6 +358,7 @@ main_thread()
 """
 mac  0009
 set  0052
+dst  0050
 buf  0010
 save 0007
 home 00b1
