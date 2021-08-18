@@ -142,7 +142,11 @@ def get_dev_name():
     
 def get_dst():
     #csa_read(0x0010, 44, dev_addr) #buf
-    dst = struct.unpack("h", csa_read(0x0050, 2, dev_addr)[1:])[0] #dst
+    try: 
+        dst = struct.unpack("h", csa_read(0x0050, 2, dev_addr)[1:])[0] #dst
+    except:
+        dst = -32768
+        
     if dst == -32768:
         print("\033[1;31;40m  --- 没有检测到金属 QAQ ---  \033[0m")
     else:
@@ -206,26 +210,27 @@ def work_thread():
                     dd_flag = 1;
                     addr_num = (int(dev_num) + 0x20)
             
-            # calibration & testing
-            # calibration for dd.
-            csa_write(0x00b1, b'\x01\x00', motor_addr)
-            for i in range(11):
-                d_v = struct.pack("i", (0x0640*i))
-                print("第 %d 步" %i)
-                csa_write(0x00bc, d_v, motor_addr)
-                time.sleep(2)
-                get_dst()
-                print("")
-                if dev_num != 0:
-                    csa_write(0x0052, struct.pack("b", i), dev_addr) #set
-                time.sleep(0.2)
-                if stop_flag:
-                    stop_flag = 0
-                    break   
-            time.sleep(1.5)                        
+            if dev_name == "bb_dd":
+                # calibration & testing
+                # calibration for dd.
+                csa_write(0x00b1, b'\x01\x00', motor_addr)
+                for i in range(11):
+                    d_v = struct.pack("i", (0x0640*i))
+                    print("第 %d 步" %i)
+                    csa_write(0x00bc, d_v, motor_addr)
+                    time.sleep(2)
+                    get_dst()
+                    print("")
+                    if dev_num != 0:
+                        csa_write(0x0052, struct.pack("b", i), dev_addr) #set
+                    time.sleep(0.2)
+                    if stop_flag:
+                        stop_flag = 0
+                        break   
+                time.sleep(1.5)                        
             
             # print address infomation.
-            # set and save.
+            # set addr and save.
             if dev_num != 0:
                 print('addr = %#x' %addr_num)
                 addr_num = addr_num.to_bytes(1, byteorder = 'little')
